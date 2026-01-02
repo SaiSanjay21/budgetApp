@@ -8,11 +8,19 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const multer = require('multer');
 const { Configuration, PlaidApi, PlaidEnvironments, Products, CountryCode } = require('plaid');
+const { parsePDFStatement } = require('./pdfParser');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Configure multer for file uploads
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
 
 // Plaid client configuration
 const configuration = new Configuration({
@@ -143,6 +151,46 @@ app.post('/api/plaid/institution', async (req, res) => {
     } catch (error) {
         console.error('Error getting institution:', error.response?.data || error.message);
         res.status(500).json({ error: 'Failed to get institution' });
+    }
+});
+
+// Parse PDF statement
+app.post('/api/parse-pdf', upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No file uploaded' });
+        }
+
+        console.log('Received PDF file:', req.file.originalname, req.file.size, 'bytes');
+
+        const result = await parsePDFStatement(req.file.buffer);
+
+        if (!result.success) {
+            return res.status(400).json({ error: result.error });
+        }
+
+        // Convert to frontend Transaction format
+        const transactions = result.transactions.map((t, index) => ({
+            id: `pdf_${Date.now()}_${index}`,
+            accountId: 'imported',
+            amount: t.type === 'debit' ? -t.amount : t.amount,
+            date: t.date,
+            merchantName: t.description,
+            category: t.category,
+            isPending: false,
+            manual: false,
+            type: t.type === 'debit' ? 'expense' : 'income',
+        }));
+
+        res.json({
+            success: true,
+            transactions,
+            count: transactions.length,
+            preview: result.rawText
+        });
+    } catch (error) {
+        console.error('PDF parsing error:', error);
+        res.status(500).json({ error: 'Failed to parse PDF: ' + error.message });
     }
 });
 

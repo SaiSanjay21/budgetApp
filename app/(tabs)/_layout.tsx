@@ -54,10 +54,16 @@ export default function TabLayout() {
                 }}
             />
             <Tabs.Screen
+                name="import"
+                options={{
+                    title: 'Import',
+                    tabBarIcon: ({ color, size }) => <Ionicons name="cloud-upload" size={size} color={color} />,
+                }}
+            />
+            <Tabs.Screen
                 name="connect"
                 options={{
-                    title: 'Banks',
-                    tabBarIcon: ({ color, size }) => <Ionicons name="add-circle" size={size} color={color} />,
+                    href: null, // Hide from tab bar but keep accessible
                 }}
             />
         </Tabs>
