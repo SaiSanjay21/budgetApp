@@ -1,4 +1,4 @@
-import { View, Text, ScrollView, RefreshControl, TouchableOpacity, Pressable } from 'react-native';
+import { View, Text, ScrollView, RefreshControl, TouchableOpacity, Pressable, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDataStore } from '../../src/store/useDataStore';
 import { useAuthStore } from '../../src/store/useAuthStore';
@@ -8,6 +8,7 @@ import { PieChart } from 'react-native-gifted-charts';
 import { CATEGORY_COLORS, Category } from '../../src/constants/Categories';
 import { AddTransactionModal } from '../../src/components/AddTransactionModal';
 import { useRouter } from 'expo-router';
+import { Transaction } from '../../src/types';
 
 export default function Dashboard() {
     const { user } = useAuthStore();
@@ -15,6 +16,12 @@ export default function Dashboard() {
     const [refreshing, setRefreshing] = useState(false);
     const [modalVisible, setModalVisible] = useState(false);
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+    const [popupData, setPopupData] = useState<{
+        visible: boolean;
+        type: 'spending' | 'income';
+        category: string;
+        transactions: Transaction[];
+    }>({ visible: false, type: 'spending', category: '', transactions: [] });
     const router = useRouter();
 
     useEffect(() => {
@@ -78,6 +85,27 @@ export default function Dashboard() {
 
     const handleCategoryPress = (category: string) => {
         setSelectedCategory(selectedCategory === category ? null : category);
+    };
+
+    const showTransactionPopup = (category: string, type: 'spending' | 'income') => {
+        const filteredTransactions = transactions.filter(tx => {
+            if (type === 'spending') {
+                return tx.category === category && tx.amount < 0;
+            } else {
+                return tx.category === category && tx.amount > 0;
+            }
+        });
+
+        setPopupData({
+            visible: true,
+            type,
+            category,
+            transactions: filteredTransactions
+        });
+    };
+
+    const closePopup = () => {
+        setPopupData({ ...popupData, visible: false });
     };
 
     return (
@@ -214,7 +242,7 @@ export default function Dashboard() {
                             </View>
                         </View>
 
-                        {/* Selected Category Details */}
+                        {/* Selected Category Details with Clickable Amounts */}
                         {selectedCategory && (
                             <View style={{
                                 marginTop: 16,
@@ -224,22 +252,49 @@ export default function Dashboard() {
                                 borderLeftWidth: 4,
                                 borderLeftColor: CATEGORY_COLORS[selectedCategory as Category] || '#9E9E9E'
                             }}>
-                                <Text style={{ fontWeight: '600', color: '#374151', marginBottom: 8 }}>
+                                <Text style={{ fontWeight: '600', color: '#374151', marginBottom: 12 }}>
                                     {selectedCategory}
                                 </Text>
                                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                                    <View>
-                                        <Text style={{ fontSize: 12, color: '#6b7280' }}>Spent</Text>
-                                        <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#ef4444' }}>
+                                    {/* Spent - Clickable */}
+                                    <Pressable
+                                        onPress={() => showTransactionPopup(selectedCategory, 'spending')}
+                                        style={{
+                                            padding: 12,
+                                            backgroundColor: '#fef2f2',
+                                            borderRadius: 8,
+                                            borderWidth: 1,
+                                            borderColor: '#fecaca',
+                                            flex: 1,
+                                            marginRight: 8
+                                        }}
+                                    >
+                                        <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>💸 Spent</Text>
+                                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#ef4444' }}>
                                             -${(categoryData.spending[selectedCategory] || 0).toFixed(2)}
                                         </Text>
-                                    </View>
-                                    <View>
-                                        <Text style={{ fontSize: 12, color: '#6b7280' }}>Received</Text>
-                                        <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#22c55e' }}>
+                                        <Text style={{ fontSize: 10, color: '#9ca3af', marginTop: 4 }}>Tap to see transactions</Text>
+                                    </Pressable>
+
+                                    {/* Received - Clickable */}
+                                    <Pressable
+                                        onPress={() => showTransactionPopup(selectedCategory, 'income')}
+                                        style={{
+                                            padding: 12,
+                                            backgroundColor: '#f0fdf4',
+                                            borderRadius: 8,
+                                            borderWidth: 1,
+                                            borderColor: '#bbf7d0',
+                                            flex: 1,
+                                            marginLeft: 8
+                                        }}
+                                    >
+                                        <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>💰 Received</Text>
+                                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#22c55e' }}>
                                             +${(categoryData.income[selectedCategory] || 0).toFixed(2)}
                                         </Text>
-                                    </View>
+                                        <Text style={{ fontSize: 10, color: '#9ca3af', marginTop: 4 }}>Tap to see transactions</Text>
+                                    </Pressable>
                                 </View>
                             </View>
                         )}
@@ -253,14 +308,20 @@ export default function Dashboard() {
                             Income Sources
                         </Text>
                         {Object.entries(categoryData.income).map(([cat, amount], index) => (
-                            <View key={index} style={{
-                                flexDirection: 'row',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                paddingVertical: 8,
-                                borderBottomWidth: index < Object.keys(categoryData.income).length - 1 ? 1 : 0,
-                                borderBottomColor: '#f3f4f6'
-                            }}>
+                            <Pressable
+                                key={index}
+                                onPress={() => showTransactionPopup(cat, 'income')}
+                                style={{
+                                    flexDirection: 'row',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    paddingVertical: 12,
+                                    paddingHorizontal: 8,
+                                    borderRadius: 6,
+                                    borderBottomWidth: index < Object.keys(categoryData.income).length - 1 ? 1 : 0,
+                                    borderBottomColor: '#f3f4f6'
+                                }}
+                            >
                                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                                     <View style={{
                                         width: 8,
@@ -271,10 +332,13 @@ export default function Dashboard() {
                                     }} />
                                     <Text style={{ color: '#374151' }}>{cat}</Text>
                                 </View>
-                                <Text style={{ fontWeight: '600', color: '#22c55e' }}>
-                                    +${amount.toFixed(2)}
-                                </Text>
-                            </View>
+                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                    <Text style={{ fontWeight: '600', color: '#22c55e', marginRight: 8 }}>
+                                        +${amount.toFixed(2)}
+                                    </Text>
+                                    <Text style={{ color: '#9ca3af' }}>→</Text>
+                                </View>
+                            </Pressable>
                         ))}
                     </View>
                 )}
@@ -287,6 +351,121 @@ export default function Dashboard() {
 
                 <View style={{ height: 40 }} />
             </ScrollView>
+
+            {/* Transaction List Popup Modal */}
+            <Modal
+                visible={popupData.visible}
+                transparent={true}
+                animationType="fade"
+                onRequestClose={closePopup}
+            >
+                <Pressable
+                    style={{
+                        flex: 1,
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        padding: 20
+                    }}
+                    onPress={closePopup}
+                >
+                    <Pressable
+                        style={{
+                            backgroundColor: 'white',
+                            borderRadius: 16,
+                            width: '100%',
+                            maxWidth: 400,
+                            maxHeight: '80%',
+                            shadowColor: '#000',
+                            shadowOffset: { width: 0, height: 4 },
+                            shadowOpacity: 0.3,
+                            shadowRadius: 8,
+                            elevation: 8
+                        }}
+                        onPress={(e) => e.stopPropagation()}
+                    >
+                        {/* Popup Header */}
+                        <View style={{
+                            padding: 16,
+                            borderBottomWidth: 1,
+                            borderBottomColor: '#e5e7eb',
+                            backgroundColor: popupData.type === 'spending' ? '#fef2f2' : '#f0fdf4',
+                            borderTopLeftRadius: 16,
+                            borderTopRightRadius: 16
+                        }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <View>
+                                    <Text style={{ fontSize: 12, color: '#6b7280' }}>
+                                        {popupData.type === 'spending' ? '💸 Spending' : '💰 Income'}
+                                    </Text>
+                                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1f2937' }}>
+                                        {popupData.category}
+                                    </Text>
+                                </View>
+                                <Pressable onPress={closePopup} style={{ padding: 8 }}>
+                                    <Text style={{ fontSize: 24, color: '#6b7280' }}>×</Text>
+                                </Pressable>
+                            </View>
+                            <Text style={{
+                                fontSize: 24,
+                                fontWeight: 'bold',
+                                color: popupData.type === 'spending' ? '#ef4444' : '#22c55e',
+                                marginTop: 8
+                            }}>
+                                {popupData.type === 'spending' ? '-' : '+'}$
+                                {popupData.transactions.reduce((sum, tx) => sum + Math.abs(tx.amount), 0).toFixed(2)}
+                            </Text>
+                            <Text style={{ fontSize: 12, color: '#6b7280' }}>
+                                {popupData.transactions.length} transaction{popupData.transactions.length !== 1 ? 's' : ''}
+                            </Text>
+                        </View>
+
+                        {/* Transaction List */}
+                        <ScrollView style={{ maxHeight: 400 }}>
+                            {popupData.transactions.length === 0 ? (
+                                <View style={{ padding: 32, alignItems: 'center' }}>
+                                    <Text style={{ fontSize: 48, marginBottom: 8 }}>📭</Text>
+                                    <Text style={{ color: '#6b7280' }}>No transactions</Text>
+                                </View>
+                            ) : (
+                                popupData.transactions.map((tx, index) => (
+                                    <View
+                                        key={tx.id}
+                                        style={{
+                                            padding: 16,
+                                            borderBottomWidth: index < popupData.transactions.length - 1 ? 1 : 0,
+                                            borderBottomColor: '#f3f4f6'
+                                        }}
+                                    >
+                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                            <View style={{ flex: 1, marginRight: 12 }}>
+                                                <Text style={{ fontWeight: '500', color: '#374151' }} numberOfLines={2}>
+                                                    {tx.merchantName}
+                                                </Text>
+                                                <Text style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>
+                                                    {new Date(tx.date).toLocaleDateString('en-US', {
+                                                        month: 'short',
+                                                        day: 'numeric',
+                                                        year: 'numeric'
+                                                    })}
+                                                </Text>
+                                            </View>
+                                            <Text style={{
+                                                fontSize: 16,
+                                                fontWeight: 'bold',
+                                                color: tx.amount < 0 ? '#ef4444' : '#22c55e'
+                                            }}>
+                                                {tx.amount < 0 ? '-' : '+'}${Math.abs(tx.amount).toFixed(2)}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                ))
+                            )}
+                        </ScrollView>
+                    </Pressable>
+                </Pressable>
+            </Modal>
+
             <AddTransactionModal visible={modalVisible} onClose={() => setModalVisible(false)} />
         </SafeAreaView>
     );
