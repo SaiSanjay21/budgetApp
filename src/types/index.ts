@@ -25,6 +25,7 @@ export interface Transaction {
     type: TransactionType;
     isPending: boolean;
     manual: boolean;
+    endDate?: string; // For time periods
 }
 
 export interface UserProfile {

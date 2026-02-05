@@ -11,6 +11,7 @@ const cors = require('cors');
 const multer = require('multer');
 const { Configuration, PlaidApi, PlaidEnvironments, Products, CountryCode } = require('plaid');
 const { parsePDFStatement } = require('./pdfParser');
+const { parseReceipt } = require('./ocrService');
 
 const app = express();
 app.use(cors());
@@ -185,12 +186,38 @@ app.post('/api/parse-pdf', upload.single('file'), async (req, res) => {
         res.json({
             success: true,
             transactions,
+            detectedBank: result.detectedBank,
             count: transactions.length,
             preview: result.rawText
         });
     } catch (error) {
         console.error('PDF parsing error:', error);
         res.status(500).json({ error: 'Failed to parse PDF: ' + error.message });
+    }
+});
+
+// Parse Receipt (Image or PDF)
+app.post('/api/parse-receipt', upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No file uploaded' });
+        }
+
+        console.log('Received Receipt:', req.file.originalname, req.file.mimetype, req.file.size);
+
+        const result = await parseReceipt(req.file.buffer, req.file.mimetype);
+
+        if (!result.success) {
+            return res.status(400).json({ error: result.error });
+        }
+
+        res.json({
+            success: true,
+            data: result.data
+        });
+    } catch (error) {
+        console.error('Receipt parsing error:', error);
+        res.status(500).json({ error: 'Failed to parse receipt' });
     }
 });
 

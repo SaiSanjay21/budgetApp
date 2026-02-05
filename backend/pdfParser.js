@@ -1,10 +1,12 @@
 /**
  * PDF Statement Parser
  * Extracts transactions from bank statement PDFs
- * Optimized for PNC Bank statements
+ * Supports PNC, Generic Bank, and Generic Credit Card formats
  */
 
 const pdfParse = require('pdf-parse');
+const { parseStatementWithPerplexity } = require('./perplexityChatService');
+require('dotenv').config();
 
 // Category keywords for auto-categorization
 const CATEGORY_KEYWORDS = {
@@ -16,7 +18,7 @@ const CATEGORY_KEYWORDS = {
     'Entertainment': ['netflix', 'spotify', 'hulu', 'disney', 'movie', 'theater', 'concert', 'gaming', 'playstation', 'xbox', 'apple music'],
     'Healthcare': ['pharmacy', 'cvs', 'walgreens', 'doctor', 'hospital', 'medical', 'dental', 'gym', 'fitness', 'health'],
     'Subscriptions': ['subscription', 'membership', 'monthly', 'annual', 'prime', 'openai', 'jobright', 'whisprgpt'],
-    'Credit Card Payment': ['amex', 'epayment', 'credit card', 'thank you'],
+    'Credit Card Payment': ['amex', 'epayment', 'credit card', 'thank you', 'payment received', 'auto-pay'],
     'Savings Transfer': ['transfer', 'savings', 'deposit'],
 };
 
@@ -42,17 +44,52 @@ async function parsePDFStatement(pdfBuffer) {
 
         console.log('PDF Text extracted, length:', text.length);
 
-        // Try PNC-specific parser first
-        let transactions = extractPNCTransactions(text);
+        let transactions = [];
 
-        // If no transactions found, try generic parser
+        // 0. Try Perplexity AI Automation first
+        // We trigger this if the text is complex or if explicitly requested. 
+        // For now, let's try it for "Credit Card" style statements that are hard to parse regex-wise,
+        // OR simply try it always if fast enough. 
+        // Given it launches a browser, it might be slow (10-20s). 
+        // Let's use it as the primary "Smart Parse" method.
+
+        console.log('Attempting Perplexity AI parsing...');
+        const aiResult = await parseStatementWithPerplexity(text);
+
+        if (aiResult.success && aiResult.transactions && aiResult.transactions.length > 0) {
+            console.log(`Perplexity extracted ${aiResult.transactions.length} transactions from ${aiResult.bankName}`);
+            return {
+                success: true,
+                transactions: deduplicateTransactions(aiResult.transactions),
+                detectedBank: aiResult.bankName || 'Imported Account',
+                rawText: text.substring(0, 500) + '...'
+            };
+        } else {
+            console.log('Perplexity parsing failed or returned no data, falling back to Regex...');
+        }
+
+        // 1. Fallback: Try PNC-specific parser
+        if (text.includes('PNC Bank') || text.includes('pnc.com')) {
+            console.log('Detected PNC Bank Statement');
+            transactions = extractPNCTransactions(text);
+        }
+
+        // 2. If PNC failed or not PNC, try Credit Card format (typically 5 columns: Trans Date, Post Date, Desc, Ref, Amount)
+        if (transactions.length === 0 && (text.includes('Payment Due Date') || text.includes('Credit Limit') || text.includes('APR'))) {
+            console.log('Detected Credit Card Statement');
+            transactions = extractCreditCardTransactions(text);
+        }
+
+        // 3. If still empty, try generic parser
         if (transactions.length === 0) {
+            console.log('Using Generic Parser');
             transactions = extractTransactionsFromText(text);
         }
 
         return {
             success: true,
-            transactions,
+            transactions: deduplicateTransactions(transactions),
+            detectedBank: text.includes('PNC Bank') ? 'PNC Bank' : (text.includes('Payment Due Date') ? 'Credit Card' : 'Generic Bank'),
             rawText: text.substring(0, 500) + '...'
         };
     } catch (error) {
@@ -65,31 +102,17 @@ async function parsePDFStatement(pdfBuffer) {
     }
 }
 
+
+
 /**
  * Extract transactions from PNC Bank statement
  */
 function extractPNCTransactions(text) {
     const transactions = [];
-
-    // PNC format: Date (MM/DD) followed by amount and description
-    // Example: "11/13400.00 Zel FromDhanush Raparthy"
-    // Or: "11/17 10.00 4859 DebitCard Purchase..."
-
-    // Pattern for PNC transactions: MM/DD followed by amount
-    const pncPattern = /(\d{2}\/\d{2})\s*(\d+\.?\d*)\s+(.+?)(?=\d{2}\/\d{2}|$)/g;
-
-    // Also try pattern with space between date and amount
-    const pncPattern2 = /(\d{2}\/\d{2})\s+(\d+\.?\d*)\s+(.+)/g;
-
-    let match;
-
-    // First, let's split by common section markers
     const sections = text.split(/(Deposits and Other Additions|Banking\/Debit Card|Online and Electronic Banking|Checks\s+paid)/i);
-
     let currentType = 'expense';
 
     for (const section of sections) {
-        // Determine transaction type based on section header
         if (section.toLowerCase().includes('deposits') || section.toLowerCase().includes('additions')) {
             currentType = 'income';
         } else if (section.toLowerCase().includes('debit') || section.toLowerCase().includes('deductions') ||
@@ -97,34 +120,17 @@ function extractPNCTransactions(text) {
             currentType = 'expense';
         }
 
-        // Find all date-amount patterns in this section
-        // Pattern: 11/13 400.00 or 11/13400.00 followed by description
         const lines = section.split('\n');
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i].trim();
-
-            // Match patterns like "11/13400.00" or "11/13 400.00"
-            const dateAmountMatch = line.match(/^(\d{2}\/\d{2})\s*(\d+\.?\d{2})\s+(.+)/);
-
+        for (const line of lines) {
+            const dateAmountMatch = line.trim().match(/^(\d{2}\/\d{2})\s*(\d+\.?\d{2})\s+(.+)/);
             if (dateAmountMatch) {
                 const [_, dateStr, amountStr, description] = dateAmountMatch;
                 const amount = parseFloat(amountStr);
 
                 if (amount > 0 && description.length > 2) {
-                    // Clean up description
-                    let cleanDesc = description
-                        .replace(/\s+/g, ' ')
-                        .replace(/St-[A-Z0-9]+/gi, '')
-                        .trim();
-
-                    // Get year (assume current year or previous if month > current month)
-                    const year = 2025; // From the statement period
-                    const [month, day] = dateStr.split('/').map(Number);
-                    const formattedDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-
+                    const cleanDesc = description.replace(/\s+/g, ' ').replace(/St-[A-Z0-9]+/gi, '').trim();
                     transactions.push({
-                        date: formattedDate,
+                        date: formatDate(dateStr),
                         description: cleanDesc,
                         amount: amount,
                         type: currentType === 'income' ? 'credit' : 'debit',
@@ -134,20 +140,57 @@ function extractPNCTransactions(text) {
             }
         }
     }
+    return transactions;
+}
 
-    // Remove duplicates
-    const uniqueTransactions = [];
-    const seen = new Set();
+/**
+ * Extract transactions from Credit Card format (Date Date Desc Amount)
+ */
+function extractCreditCardTransactions(text) {
+    const transactions = [];
+    const lines = text.split('\n');
 
-    for (const tx of transactions) {
-        const key = `${tx.date}-${tx.amount}-${tx.description.substring(0, 20)}`;
-        if (!seen.has(key)) {
-            seen.add(key);
-            uniqueTransactions.push(tx);
+    // Pattern: MM/DD (optional MM/DD) Description... $Amount or Amount
+    // Matches: 12/01 12/02 Starbucks 5.40
+    // Updated to be more flexible with spacing and currency symbols
+    const ccPattern = /(\d{2}\/\d{2})\s+(?:\d{2}\/\d{2}\s+)?(.+?)\s+([\-\$]?\s*[\d,]+\.\d{2})/;
+
+    for (const line of lines) {
+        const match = line.trim().match(ccPattern);
+        if (match) {
+            const [_, transDate, description, amountStr] = match;
+
+            // Clean amount: remove $, commas, and spaces
+            let amount = parseFloat(amountStr.replace(/[$,\s]/g, ''));
+
+            // Explicit NaN check
+            if (isNaN(amount) || amount === 0) continue;
+
+            const isPayment = description.toLowerCase().includes('payment') || description.toLowerCase().includes('thank you') || amount < 0;
+            const isCredit = isPayment; // In CC context, payments are credits (reduce balance)
+
+            // Typically CC statements show expenses as positive numbers in the "New Charges" section
+            // But sometimes refunds are negative.
+            // We'll trust the sign if it's explicitly negative.
+            // If it's positive but "Payment", it's a credit.
+
+            const cleanDesc = description.trim();
+            if (cleanDesc.length < 2) continue;
+
+            // Exclude headers
+            if (cleanDesc.includes('Opening Balance') || cleanDesc.includes('Closing Balance')) continue;
+
+            transactions.push({
+                date: formatDate(transDate),
+                description: cleanDesc,
+                amount: Math.abs(amount), // We handle sign in server.js based on type
+                type: isCredit ? 'credit' : 'debit',
+                category: categorizeTransaction(cleanDesc)
+            });
         }
     }
 
-    return uniqueTransactions;
+    return transactions;
 }
 
 /**
@@ -157,38 +200,58 @@ function extractTransactionsFromText(text) {
     const transactions = [];
     const lines = text.split('\n');
 
-    // Common date patterns: MM/DD/YYYY, MM/DD/YY, MM-DD-YYYY
     const datePattern = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/;
-    // Amount pattern: $X,XXX.XX or X,XXX.XX or -$X.XX
     const amountPattern = /[\-\$]?\$?[\d,]+\.\d{2}/g;
 
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
+    for (const line of lines) {
+        const l = line.trim();
+        if (!l) continue;
 
-        const dateMatch = line.match(datePattern);
+        // Skip common header/footer lines that might look like transactions
+        if (l.toLowerCase().includes('page') || l.toLowerCase().includes('balance') || l.toLowerCase().includes('total')) continue;
+
+        const dateMatch = l.match(datePattern);
         if (!dateMatch) continue;
 
-        const amounts = line.match(amountPattern);
+        const amounts = l.match(amountPattern);
         if (!amounts || amounts.length === 0) continue;
 
-        const amountStr = amounts[amounts.length - 1];
-        const amount = parseFloat(amountStr.replace(/[$,]/g, ''));
+        // Robust amount cleaning
+        const amountStr = amounts[amounts.length - 1]; // improved to take last match which is usually the transaction amount
+        // Remove '$', ',' and whitespace before parsing
+        const cleanAmountStr = amountStr.replace(/[$,\s]/g, '');
+        const amount = parseFloat(cleanAmountStr);
 
-        if (isNaN(amount) || amount === 0) continue;
+        // Explicit NaN check - CRITICAL FIX
+        if (isNaN(amount) || amount === 0) {
+            console.log(`Skipping invalid amount: ${amountStr} in line: ${l}`);
+            continue;
+        }
 
-        const dateIndex = line.indexOf(dateMatch[0]);
-        const amountIndex = line.lastIndexOf(amountStr);
+        const dateIndex = l.indexOf(dateMatch[0]);
+        // Be careful finding amount index, it might appear multiple times
+        // We assume description is between date and the LAST amount
+        const amountIndex = l.lastIndexOf(amountStr);
 
-        let description = line.substring(dateIndex + dateMatch[0].length, amountIndex).trim();
-        description = description.replace(/\s+/g, ' ').replace(/^\s*[\-\*]\s*/, '').trim();
+        if (amountIndex <= dateIndex) continue; // Safety check
 
+        let description = l.substring(dateIndex + dateMatch[0].length, amountIndex).trim();
+
+        // Cleanup description
+        description = description
+            .replace(/\s+/g, ' ') // Collapse multiple spaces
+            .replace(/^\s*[\-\*]\s*/, '') // Remove leading bullets
+            .replace(/\d{2}\/\d{2}/g, '') // Remove accidentally captured dates
+            .replace('Purchase', '')
+            .trim();
+
+        // Skip really short descriptions or header-like lines
         if (description.length < 3) continue;
 
         const isCredit = amountStr.startsWith('-') ||
-            line.toLowerCase().includes('payment received') ||
-            line.toLowerCase().includes('credit') ||
-            line.toLowerCase().includes('deposit');
+            l.toLowerCase().includes('payment received') ||
+            l.toLowerCase().includes('credit') ||
+            l.toLowerCase().includes('deposit');
 
         transactions.push({
             date: formatDate(dateMatch[0]),
@@ -202,25 +265,44 @@ function extractTransactionsFromText(text) {
     return transactions;
 }
 
-/**
- * Format date to YYYY-MM-DD
- */
+function deduplicateTransactions(transactions) {
+    const unique = [];
+    const seen = new Set();
+    for (const tx of transactions) {
+        // Create a unique key
+        const key = `${tx.date}-${tx.amount.toFixed(2)}-${tx.description.substring(0, 15)}`;
+        if (!seen.has(key)) {
+            seen.add(key);
+            unique.push(tx);
+        }
+    }
+    return unique;
+}
+
 function formatDate(dateStr) {
+    // Handle MM/DD (assume current year) or MM/DD/YYYY
     const parts = dateStr.split(/[\/\-]/);
 
-    if (parts.length === 3) {
-        let month = parseInt(parts[0]);
-        let day = parseInt(parts[1]);
-        let year = parseInt(parts[2]);
+    let year = new Date().getFullYear();
+    let month = 1;
+    let day = 1;
 
-        if (year < 100) {
-            year += 2000;
+    if (parts.length === 2) {
+        // MM/DD
+        month = parseInt(parts[0]);
+        day = parseInt(parts[1]);
+        // Adjust for year rollover? Assume if month > current month, it's last year
+        if (month > (new Date().getMonth() + 1)) {
+            year = year - 1;
         }
-
-        return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    } else if (parts.length === 3) {
+        month = parseInt(parts[0]);
+        day = parseInt(parts[1]);
+        year = parseInt(parts[2]);
+        if (year < 100) year += 2000;
     }
 
-    return dateStr;
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 module.exports = { parsePDFStatement };

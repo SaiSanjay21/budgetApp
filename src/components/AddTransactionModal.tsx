@@ -1,5 +1,6 @@
-import { Modal, View, Text, TextInput, TouchableOpacity, ScrollView, Pressable, Platform } from 'react-native';
+import { Modal, View, Text, TextInput, TouchableOpacity, ScrollView, Pressable, Platform, ActivityIndicator, Alert, Switch } from 'react-native';
 import { useState } from 'react';
+import * as DocumentPicker from 'expo-document-picker';
 import { SPENDING_CATEGORIES } from '../constants/Categories';
 import { useDataStore } from '../store/useDataStore';
 import { Transaction } from '../types';
@@ -15,7 +16,63 @@ export function AddTransactionModal({ visible, onClose }: Props) {
     const [merchant, setMerchant] = useState('');
     const [category, setCategory] = useState<typeof SPENDING_CATEGORIES[number]>(SPENDING_CATEGORIES[0]);
     const [transactionType, setTransactionType] = useState<'expense' | 'income'>('expense');
-    const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+
+    // Date & Time Period State
+    const [isPeriod, setIsPeriod] = useState(false);
+    const [date, setDate] = useState(new Date().toISOString().split('T')[0]); // Start Date
+    const [endDate, setEndDate] = useState(''); // End Date (optional)
+
+    const [isUploading, setIsUploading] = useState(false);
+
+    const handleUploadReceipt = async () => {
+        try {
+            const result = await DocumentPicker.getDocumentAsync({
+                type: ['image/*', 'application/pdf'],
+                copyToCacheDirectory: true
+            });
+
+            if (result.canceled) return;
+
+            setIsUploading(true);
+            const file = result.assets[0];
+
+            const formData = new FormData();
+            formData.append('file', {
+                uri: file.uri,
+                name: file.name,
+                type: file.mimeType || 'application/octet-stream'
+            } as any);
+
+            // Replace with your backend URL
+            const response = await fetch('http://localhost:3001/api/parse-receipt', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                },
+            });
+
+            const data = await response.json();
+
+            if (data.success && data.data) {
+                const { amount: extractedAmount, date: extractedDate, merchantName } = data.data;
+
+                if (extractedAmount) setAmount(extractedAmount.toString());
+                if (extractedDate) setDate(extractedDate);
+                if (merchantName) setMerchant(merchantName);
+
+                Alert.alert('Receipt Scanned', 'Details extracted from receipt!');
+            } else {
+                Alert.alert('Error', data.error || 'Failed to parse receipt');
+            }
+
+        } catch (error) {
+            console.error('Upload error:', error);
+            Alert.alert('Error', 'Failed to upload receipt');
+        } finally {
+            setIsUploading(false);
+        }
+    };
 
     const handleSubmit = () => {
         if (!amount || !merchant) return;
@@ -28,6 +85,7 @@ export function AddTransactionModal({ visible, onClose }: Props) {
             accountId: 'cash',
             amount: finalAmount,
             date: date,
+            endDate: isPeriod ? endDate : undefined,
             merchantName: merchant,
             category,
             type: transactionType,
@@ -46,6 +104,8 @@ export function AddTransactionModal({ visible, onClose }: Props) {
         setCategory(SPENDING_CATEGORIES[0]);
         setTransactionType('expense');
         setDate(new Date().toISOString().split('T')[0]);
+        setEndDate('');
+        setIsPeriod(false);
     };
 
     return (
@@ -102,6 +162,29 @@ export function AddTransactionModal({ visible, onClose }: Props) {
                             </Pressable>
                         </View>
 
+                        {/* Receipt Upload */}
+                        <TouchableOpacity
+                            onPress={handleUploadReceipt}
+                            disabled={isUploading}
+                            style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                backgroundColor: '#eff6ff',
+                                padding: 12,
+                                borderRadius: 12,
+                                marginBottom: 20,
+                                borderWidth: 1,
+                                borderColor: '#bfdbfe',
+                                borderStyle: 'dashed'
+                            }}>
+                            {isUploading ? (
+                                <ActivityIndicator size="small" color="#2563eb" />
+                            ) : (
+                                <Text style={{ color: '#2563eb', fontWeight: '600' }}>📸 Scan Receipt to Auto-fill</Text>
+                            )}
+                        </TouchableOpacity>
+
                         {/* Amount */}
                         <Text style={{ color: '#6b7280', fontWeight: '500', marginBottom: 8 }}>Amount</Text>
                         <View style={{
@@ -153,22 +236,59 @@ export function AddTransactionModal({ visible, onClose }: Props) {
                             onChangeText={setMerchant}
                         />
 
-                        {/* Date */}
-                        <Text style={{ color: '#6b7280', fontWeight: '500', marginBottom: 8 }}>Date</Text>
-                        <TextInput
-                            style={{
-                                backgroundColor: '#f3f4f6',
-                                padding: 16,
-                                borderRadius: 12,
-                                fontSize: 16,
-                                marginBottom: 16,
-                                color: '#111827'
-                            }}
-                            placeholder="YYYY-MM-DD"
-                            placeholderTextColor="#9ca3af"
-                            value={date}
-                            onChangeText={setDate}
-                        />
+                        {/* Date & Time Period */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                            <Text style={{ color: '#6b7280', fontWeight: '500' }}>Date / Period</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                <Text style={{ fontSize: 12, color: '#6b7280', marginRight: 8 }}>Time Period?</Text>
+                                <Switch
+                                    value={isPeriod}
+                                    onValueChange={setIsPeriod}
+                                    trackColor={{ false: "#d1d5db", true: "#bfdbfe" }}
+                                    thumbColor={isPeriod ? "#2563eb" : "#f4f3f4"}
+                                />
+                            </View>
+                        </View>
+
+                        <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
+                            <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 12, color: '#9ca3af', marginBottom: 4 }}>
+                                    {isPeriod ? 'Start Date' : 'Date'}
+                                </Text>
+                                <TextInput
+                                    style={{
+                                        backgroundColor: '#f3f4f6',
+                                        padding: 16,
+                                        borderRadius: 12,
+                                        fontSize: 16,
+                                        color: '#111827'
+                                    }}
+                                    placeholder="YYYY-MM-DD"
+                                    placeholderTextColor="#9ca3af"
+                                    value={date}
+                                    onChangeText={setDate}
+                                />
+                            </View>
+
+                            {isPeriod && (
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ fontSize: 12, color: '#9ca3af', marginBottom: 4 }}>End Date</Text>
+                                    <TextInput
+                                        style={{
+                                            backgroundColor: '#f3f4f6',
+                                            padding: 16,
+                                            borderRadius: 12,
+                                            fontSize: 16,
+                                            color: '#111827'
+                                        }}
+                                        placeholder="YYYY-MM-DD"
+                                        placeholderTextColor="#9ca3af"
+                                        value={endDate}
+                                        onChangeText={setEndDate}
+                                    />
+                                </View>
+                            )}
+                        </View>
 
                         {/* Category */}
                         <Text style={{ color: '#6b7280', fontWeight: '500', marginBottom: 8 }}>Category</Text>
@@ -210,7 +330,9 @@ export function AddTransactionModal({ visible, onClose }: Props) {
                                     <Text style={{ fontWeight: '600', color: '#374151' }}>
                                         {merchant || 'Description...'}
                                     </Text>
-                                    <Text style={{ fontSize: 12, color: '#6b7280' }}>{date} • {category}</Text>
+                                    <Text style={{ fontSize: 12, color: '#6b7280' }}>
+                                        {date}{isPeriod && endDate ? ` - ${endDate}` : ''} • {category}
+                                    </Text>
                                 </View>
                                 <Text style={{
                                     fontSize: 20,

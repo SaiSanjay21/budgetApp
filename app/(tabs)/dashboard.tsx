@@ -448,6 +448,11 @@ export default function Dashboard() {
                                                         day: 'numeric',
                                                         year: 'numeric'
                                                     })}
+                                                    {/* Account Name Lookup */}
+                                                    {(() => {
+                                                        const account = accounts.find(acc => acc.id === tx.accountId);
+                                                        return account ? ` • ${account.name}` : '';
+                                                    })()}
                                                 </Text>
                                             </View>
                                             <Text style={{

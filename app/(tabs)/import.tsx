@@ -2,6 +2,7 @@ import { View, Text, Pressable, ActivityIndicator, Platform, ScrollView } from '
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState, useRef } from 'react';
 import { useRouter } from 'expo-router';
+import * as DocumentPicker from 'expo-document-picker';
 import { parseCSV, detectBankType, BankType } from '../../src/services/csvParser';
 import { useDataStore } from '../../src/store/useDataStore';
 import { Transaction } from '../../src/types';
@@ -14,11 +15,59 @@ export default function ImportScreen() {
     const [success, setSuccess] = useState<string | null>(null);
     const [preview, setPreview] = useState<Transaction[]>([]);
     const [selectedBank, setSelectedBank] = useState<BankType>('auto');
+    const [detectedBankName, setDetectedBankName] = useState<string>('Imported Account');
     const fileInputRef = useRef<HTMLInputElement>(null);
     const router = useRouter();
     const { importTransactions } = useDataStore();
 
-    const handleFileSelect = async (event: any) => {
+    const pickDocument = async () => {
+        setError(null);
+        setSuccess(null);
+
+        if (Platform.OS === 'web') {
+            fileInputRef.current?.click();
+            return;
+        }
+
+        try {
+            setIsLoading(true);
+            const result = await DocumentPicker.getDocumentAsync({
+                type: ['application/pdf', 'text/comma-separated-values', 'text/csv'],
+                copyToCacheDirectory: true
+            });
+
+            if (result.canceled) {
+                setIsLoading(false);
+                return;
+            }
+
+            const file = result.assets[0];
+            const fileName = file.name.toLowerCase();
+
+            // Native File Object for Upload (slightly different structure than Web)
+            const fileObj = {
+                uri: file.uri,
+                name: file.name,
+                type: file.mimeType || 'application/octet-stream' // fallback type
+            };
+
+            if (fileName.endsWith('.pdf')) {
+                await handleNativePDFUpload(fileObj);
+            } else if (fileName.endsWith('.csv')) {
+                await handleNativePDFUpload(fileObj);
+            } else {
+                setError('Unsupported file type.');
+            }
+
+        } catch (err) {
+            console.error('Pick error:', err);
+            setError('Failed to pick file');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleWebFileSelect = async (event: any) => {
         setError(null);
         setSuccess(null);
         setIsLoading(true);
@@ -26,11 +75,9 @@ export default function ImportScreen() {
         try {
             const file = event.target.files?.[0];
             if (!file) {
-                setError('No file selected');
                 setIsLoading(false);
                 return;
             }
-
             const fileName = file.name.toLowerCase();
 
             // Handle PDF files
@@ -45,9 +92,55 @@ export default function ImportScreen() {
             }
         } catch (err) {
             console.error('Error processing file:', err);
-            setError('Failed to process file. Please try again.');
+            setError('Failed to process file.');
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const handleNativePDFUpload = async (fileObj: any) => {
+        try {
+            const formData = new FormData();
+            formData.append('file', {
+                uri: fileObj.uri,
+                name: fileObj.name,
+                type: fileObj.type
+            } as any);
+
+            const response = await fetch(`${BACKEND_URL}/api/parse-pdf`, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                },
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                setError(data.error || 'Failed to parse PDF');
+                return;
+            }
+
+            if (data.transactions.length === 0) {
+                setError('No transactions found. Format may not be supported.');
+                return;
+            }
+
+            setPreview(data.transactions);
+
+            // Set detected bank name
+            if (data.detectedBank) {
+                setDetectedBankName(data.detectedBank);
+                setSuccess(`Found ${data.transactions.length} transactions from ${data.detectedBank}!`);
+            } else {
+                setDetectedBankName('Imported PDF Statement');
+                setSuccess(`Found ${data.transactions.length} transactions!`);
+            }
+
+        } catch (err) {
+            console.error('Upload error:', err);
+            setError('Failed to upload file. Check backend connection.');
         }
     };
 
@@ -74,7 +167,16 @@ export default function ImportScreen() {
             }
 
             setPreview(data.transactions);
-            setSuccess(`Found ${data.transactions.length} transactions from PDF!`);
+
+            // Set detected bank name
+            if (data.detectedBank) {
+                setDetectedBankName(data.detectedBank);
+                setSuccess(`Found ${data.transactions.length} transactions from ${data.detectedBank}!`);
+            } else {
+                setDetectedBankName('Imported PDF Statement');
+                setSuccess(`Found ${data.transactions.length} transactions!`);
+            }
+
         } catch (err) {
             console.error('PDF parsing error:', err);
             setError('Failed to connect to server. Make sure backend is running on port 3001.');
@@ -84,7 +186,8 @@ export default function ImportScreen() {
     const handleCSVFile = async (file: File) => {
         const content = await file.text();
         const detectedBank = detectBankType(content);
-        const transactions = parseCSV(content, selectedBank === 'auto' ? detectedBank : selectedBank);
+        const finalBankType = selectedBank === 'auto' ? detectedBank : selectedBank;
+        const transactions = parseCSV(content, finalBankType);
 
         if (transactions.length === 0) {
             setError('No transactions found in CSV. Please check the format.');
@@ -92,13 +195,26 @@ export default function ImportScreen() {
         }
 
         setPreview(transactions);
-        setSuccess(`Found ${transactions.length} transactions!`);
+
+        // Map bank code to readable name
+        const bankNameMap: Record<string, string> = {
+            'pnc': 'PNC Bank',
+            'amex': 'American Express',
+            'capital_one': 'Capital One',
+            'auto': 'Imported CSV'
+        };
+
+        const friendlyName = bankNameMap[finalBankType] || 'Imported CSV';
+        setDetectedBankName(friendlyName);
+        setSuccess(`Found ${transactions.length} transactions from ${friendlyName}!`);
     };
 
     const handleImport = () => {
         setIsLoading(true);
-        importTransactions(preview);
-        setSuccess(`Imported ${preview.length} transactions!`);
+        // Pass the detected bank name to create/update specific account
+        importTransactions(preview, detectedBankName);
+
+        setSuccess(`Imported ${preview.length} transactions to "${detectedBankName}"!`);
         setPreview([]);
 
         setTimeout(() => {
@@ -162,13 +278,13 @@ export default function ImportScreen() {
                         ref={fileInputRef}
                         type="file"
                         accept=".csv,.pdf"
-                        onChange={handleFileSelect}
+                        onChange={handleWebFileSelect}
                         style={{ display: 'none' }}
                     />
                 )}
 
                 <Pressable
-                    onPress={triggerFileInput}
+                    onPress={pickDocument}
                     disabled={isLoading}
                     style={{
                         backgroundColor: '#f3f4f6',
@@ -196,6 +312,28 @@ export default function ImportScreen() {
                     )}
                 </Pressable>
 
+                {/* Confirm Import Button (Only when preview exists) */}
+                {preview.length > 0 && (
+                    <View style={{ marginBottom: 24 }}>
+                        <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 8 }}>
+                            Importing to: <Text style={{ color: '#2563eb' }}>{detectedBankName}</Text>
+                        </Text>
+                        <Pressable
+                            onPress={handleImport}
+                            style={{
+                                backgroundColor: '#16a34a',
+                                padding: 16,
+                                borderRadius: 8,
+                                alignItems: 'center'
+                            }}
+                        >
+                            <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>
+                                Confirm Import ({preview.length} Transactions)
+                            </Text>
+                        </Pressable>
+                    </View>
+                )}
+
                 {/* Error/Success Messages */}
                 {error && (
                     <View style={{ backgroundColor: '#fef2f2', padding: 12, borderRadius: 8, marginBottom: 16 }}>
@@ -208,86 +346,6 @@ export default function ImportScreen() {
                         <Text style={{ color: '#16a34a' }}>✅ {success}</Text>
                     </View>
                 )}
-
-                {/* Preview */}
-                {preview.length > 0 && (
-                    <View style={{ marginBottom: 24 }}>
-                        <Text style={{ fontSize: 18, fontWeight: '600', color: '#374151', marginBottom: 12 }}>
-                            Preview ({preview.length} transactions)
-                        </Text>
-
-                        <View style={{ backgroundColor: '#f9fafb', borderRadius: 12, padding: 16, maxHeight: 300 }}>
-                            {preview.slice(0, 10).map((t, index) => (
-                                <View key={index} style={{
-                                    flexDirection: 'row',
-                                    justifyContent: 'space-between',
-                                    paddingVertical: 8,
-                                    borderBottomWidth: index < 9 ? 1 : 0,
-                                    borderBottomColor: '#e5e7eb',
-                                }}>
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={{ fontWeight: '500', color: '#374151' }} numberOfLines={1}>
-                                            {t.merchantName}
-                                        </Text>
-                                        <Text style={{ fontSize: 12, color: '#6b7280' }}>
-                                            {t.date} • {t.category}
-                                        </Text>
-                                    </View>
-                                    <Text style={{
-                                        fontWeight: '600',
-                                        color: t.amount < 0 ? '#dc2626' : '#16a34a'
-                                    }}>
-                                        {t.amount < 0 ? '-' : '+'}${Math.abs(t.amount).toFixed(2)}
-                                    </Text>
-                                </View>
-                            ))}
-                            {preview.length > 10 && (
-                                <Text style={{ marginTop: 8, color: '#6b7280', textAlign: 'center' }}>
-                                    ... and {preview.length - 10} more
-                                </Text>
-                            )}
-                        </View>
-
-                        <Pressable
-                            onPress={handleImport}
-                            disabled={isLoading}
-                            style={{
-                                backgroundColor: '#16a34a',
-                                padding: 16,
-                                borderRadius: 12,
-                                alignItems: 'center',
-                                marginTop: 16,
-                            }}
-                        >
-                            {isLoading ? (
-                                <ActivityIndicator color="white" />
-                            ) : (
-                                <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>
-                                    Import {preview.length} Transactions
-                                </Text>
-                            )}
-                        </Pressable>
-                    </View>
-                )}
-
-                {/* Instructions */}
-                <View style={{ backgroundColor: '#f0f9ff', padding: 16, borderRadius: 12, marginBottom: 24 }}>
-                    <Text style={{ fontWeight: '600', color: '#0369a1', marginBottom: 8 }}>
-                        📋 How to download your statements:
-                    </Text>
-                    <Text style={{ color: '#0369a1', lineHeight: 20 }}>
-                        • <Text style={{ fontWeight: '600' }}>PNC:</Text> Online Banking → Statements → Download PDF{'\n'}
-                        • <Text style={{ fontWeight: '600' }}>Amex:</Text> Statements & Activity → View PDF{'\n'}
-                        • <Text style={{ fontWeight: '600' }}>Capital One:</Text> Statements → Download
-                    </Text>
-                </View>
-
-                <Pressable
-                    onPress={() => router.back()}
-                    style={{ padding: 16, alignItems: 'center' }}
-                >
-                    <Text style={{ color: '#6b7280' }}>Go Back</Text>
-                </Pressable>
             </ScrollView>
         </SafeAreaView>
     );

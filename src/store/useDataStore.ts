@@ -21,7 +21,7 @@ interface DataState {
     refreshData: () => Promise<void>;
     addTransaction: (tx: Transaction) => void;
     updateTransaction: (tx: Transaction) => void;
-    importTransactions: (txs: Transaction[]) => void;
+    importTransactions: (txs: Transaction[], accountName?: string) => void;
     clearTransactions: () => void;
     clearAllData: () => void;
     updateAccountBalance: (accountId: string, balance: number) => void;
@@ -51,25 +51,58 @@ export const useDataStore = create<DataState>((set, get) => ({
         )
     })),
 
-    importTransactions: (txs) => set((state) => {
-        const allTransactions = [...txs, ...state.transactions]
+    importTransactions: (txs, accountNameInput = 'Imported Account') => set((state) => {
+        // 1. Determine or Create Account
+        // Check if an account with this name already exists
+        let targetAccount = state.accounts.find(
+            acc => acc.name.toLowerCase().includes(accountNameInput.toLowerCase()) ||
+                acc.id === accountNameInput
+        );
+
+        let updatedAccounts = [...state.accounts];
+        let targetAccountId = targetAccount ? targetAccount.id : `acc_${Date.now()}`;
+
+        if (!targetAccount) {
+            // Create new account if not found
+            targetAccount = {
+                id: targetAccountId,
+                name: accountNameInput,
+                type: accountNameInput.toLowerCase().includes('card') ? 'credit' : 'savings', // simple heuristic
+                institution: accountNameInput,
+                balance: 0,
+                currency: 'USD',
+                lastSynced: new Date().toISOString(),
+            };
+            updatedAccounts.push(targetAccount);
+        }
+
+        // 2. Link Transactions to this Account
+        const newTransactions = txs.map(tx => ({
+            ...tx,
+            accountId: targetAccountId // Overwrite the generic 'imported' id
+        }));
+
+        const allTransactions = [...newTransactions, ...state.transactions]
             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-        // Calculate balance from transactions
-        const totalIncome = allTransactions
+        // 3. Recalculate Balance for the Target Account ONLY
+        // We calculate balance based on ALL transactions for this account (old + new)
+        const accountTransactions = allTransactions.filter(tx => tx.accountId === targetAccountId);
+
+        const totalIncome = accountTransactions
             .filter(tx => tx.amount > 0)
             .reduce((sum, tx) => sum + tx.amount, 0);
-        const totalExpenses = allTransactions
+        const totalExpenses = accountTransactions
             .filter(tx => tx.amount < 0)
             .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
-        const netBalance = totalIncome - totalExpenses;
 
-        // Update account balance
-        const updatedAccounts = state.accounts.map(acc => ({
-            ...acc,
-            balance: acc.id === 'pnc-spend' ? 1135.86 : acc.balance, // From statement ending balance
-            lastSynced: new Date().toISOString()
-        }));
+        const newBalance = totalIncome - totalExpenses;
+
+        updatedAccounts = updatedAccounts.map(acc =>
+            acc.id === targetAccountId
+                ? { ...acc, balance: newBalance, lastSynced: new Date().toISOString() }
+                : acc
+        );
 
         return {
             transactions: allTransactions,
