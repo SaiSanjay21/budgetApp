@@ -47,6 +47,13 @@ export default function TabLayout() {
                 }}
             />
             <Tabs.Screen
+                name="subscriptions"
+                options={{
+                    title: 'Subs',
+                    tabBarIcon: ({ color, size }) => <Ionicons name="repeat" size={size} color={color} />,
+                }}
+            />
+            <Tabs.Screen
                 name="profile"
                 options={{
                     title: 'Profile',

@@ -15,9 +15,9 @@ const CATEGORY_KEYWORDS = {
     'Utilities': ['electric', 'water', 'gas bill', 'internet', 'comcast', 'verizon', 'att', 'phone', 'utility', 'power', 'energy', 't-mobile'],
     'Transportation': ['uber', 'lyft', 'gas', 'shell', 'chevron', 'exxon', 'parking', 'transit', 'metro', 'fuel', 'sunoco', 'bp', 'wawa'],
     'Shopping': ['amazon', 'walmart', 'target', 'costco', 'best buy', 'home depot', 'lowes', 'ikea', 'macys', 'nordstrom', 'kohls', 'tjmaxx'],
-    'Entertainment': ['netflix', 'spotify', 'hulu', 'disney', 'movie', 'theater', 'concert', 'gaming', 'playstation', 'xbox', 'apple music'],
+    'Entertainment': ['movie', 'theater', 'concert', 'gaming', 'arcade', 'bowling', 'amusement'],
     'Healthcare': ['pharmacy', 'cvs', 'walgreens', 'doctor', 'hospital', 'medical', 'dental', 'gym', 'fitness', 'health'],
-    'Subscriptions': ['subscription', 'membership', 'monthly', 'annual', 'prime', 'openai', 'jobright', 'whisprgpt'],
+    'Subscriptions': ['subscription', 'membership', 'monthly', 'annual', 'prime', 'openai', 'jobright', 'whisprgpt', 'netflix', 'spotify', 'hulu', 'disney', 'apple music', 'youtube premium', 'youtube music', 'chatgpt', 'adobe', 'microsoft 365', 'dropbox', 'google one', 'icloud', 'github', 'notion', 'slack', 'zoom', 'grammarly', 'canva', 'linkedin premium', 'paramount', 'peacock', 'hbo', 'crunchyroll', 'audible', 'kindle', 'playstation plus', 'xbox game', 'nintendo', 'patreon', 'planet fitness'],
     'Credit Card Payment': ['amex', 'epayment', 'credit card', 'thank you', 'payment received', 'auto-pay'],
     'Savings Transfer': ['transfer', 'savings', 'deposit'],
 };

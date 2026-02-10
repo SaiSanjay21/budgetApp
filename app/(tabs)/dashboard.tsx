@@ -9,6 +9,7 @@ import { CATEGORY_COLORS, Category } from '../../src/constants/Categories';
 import { AddTransactionModal } from '../../src/components/AddTransactionModal';
 import { useRouter } from 'expo-router';
 import { Transaction } from '../../src/types';
+import { SubscriptionWidget } from '../../src/components/SubscriptionWidget';
 
 export default function Dashboard() {
     const { user } = useAuthStore();
@@ -160,6 +161,9 @@ export default function Dashboard() {
                         </View>
                     )}
                 </View>
+
+                {/* Subscription Widget */}
+                {hasTransactions && <SubscriptionWidget />}
 
                 {/* Empty State */}
                 {!hasTransactions && (
