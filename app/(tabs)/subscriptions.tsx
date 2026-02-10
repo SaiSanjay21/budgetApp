@@ -1,4 +1,4 @@
-import { View, Text, ScrollView, TouchableOpacity, Pressable, Modal } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Pressable, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useDataStore } from '../../src/store/useDataStore';
@@ -33,13 +33,24 @@ const CONFIDENCE_CONFIG: Record<string, { label: string; color: string; bg: stri
 };
 
 export default function SubscriptionsScreen() {
-    const { transactions, accounts } = useDataStore();
+    const { transactions, accounts, dismissedSubscriptionIds, dismissSubscription, restoreSubscription } = useDataStore();
     const [selectedSub, setSelectedSub] = useState<DetectedSubscription | null>(null);
     const [expandedCard, setExpandedCard] = useState<string | null>(null);
 
-    const allSubscriptions = useMemo(
+    const allDetected = useMemo(
         () => detectSubscriptions(transactions, accounts),
         [transactions, accounts]
+    );
+
+    // Split into active (non-dismissed) and dismissed
+    const allSubscriptions = useMemo(
+        () => allDetected.filter(s => !dismissedSubscriptionIds.includes(s.id)),
+        [allDetected, dismissedSubscriptionIds]
+    );
+
+    const dismissedSubscriptions = useMemo(
+        () => allDetected.filter(s => dismissedSubscriptionIds.includes(s.id)),
+        [allDetected, dismissedSubscriptionIds]
     );
 
     const cardGroups = useMemo(
@@ -58,6 +69,21 @@ export default function SubscriptionsScreen() {
 
     const toggleCard = (accountId: string) => {
         setExpandedCard(expandedCard === accountId ? null : accountId);
+    };
+
+    const handleDismiss = (sub: DetectedSubscription) => {
+        Alert.alert(
+            `Remove ${sub.displayName}?`,
+            'This subscription will be excluded from your expense predictions. You can restore it later.',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Remove',
+                    style: 'destructive',
+                    onPress: () => dismissSubscription(sub.id),
+                },
+            ]
+        );
     };
 
     return (
@@ -226,10 +252,8 @@ export default function SubscriptionsScreen() {
                                         : null;
 
                                     return (
-                                        <TouchableOpacity
+                                        <View
                                             key={sub.id}
-                                            onPress={() => setSelectedSub(sub)}
-                                            activeOpacity={0.6}
                                             style={{
                                                 padding: 16,
                                                 flexDirection: 'row',
@@ -238,11 +262,13 @@ export default function SubscriptionsScreen() {
                                                 borderBottomColor: '#f3f4f6',
                                             }}
                                         >
-                                            {/* Icon */}
-                                            <Text style={{ fontSize: 24, marginRight: 12 }}>{sub.icon}</Text>
+                                            {/* Icon — tap to see timeline */}
+                                            <TouchableOpacity onPress={() => setSelectedSub(sub)} activeOpacity={0.6}>
+                                                <Text style={{ fontSize: 24, marginRight: 12 }}>{sub.icon}</Text>
+                                            </TouchableOpacity>
 
-                                            {/* Info */}
-                                            <View style={{ flex: 1 }}>
+                                            {/* Info — tap to see timeline */}
+                                            <TouchableOpacity onPress={() => setSelectedSub(sub)} activeOpacity={0.6} style={{ flex: 1 }}>
                                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                                                     <Text style={{ fontWeight: '600', color: '#1f2937', fontSize: 15 }}>
                                                         {sub.displayName}
@@ -273,7 +299,6 @@ export default function SubscriptionsScreen() {
                                                 </View>
 
                                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                                                    {/* Frequency badge */}
                                                     <View style={{
                                                         backgroundColor: FREQUENCY_COLORS[sub.frequency] + '20',
                                                         paddingHorizontal: 5,
@@ -289,7 +314,6 @@ export default function SubscriptionsScreen() {
                                                         </Text>
                                                     </View>
 
-                                                    {/* Confidence badge */}
                                                     <View style={{
                                                         backgroundColor: confConfig.bg,
                                                         paddingHorizontal: 5,
@@ -305,7 +329,6 @@ export default function SubscriptionsScreen() {
                                                         </Text>
                                                     </View>
 
-                                                    {/* Service category */}
                                                     {serviceConfig && (
                                                         <Text style={{ color: serviceConfig.color, fontSize: 10, fontWeight: '500' }}>
                                                             {serviceConfig.label}
@@ -313,14 +336,13 @@ export default function SubscriptionsScreen() {
                                                     )}
                                                 </View>
 
-                                                {/* Timeline hint */}
                                                 <Text style={{ color: '#9ca3af', fontSize: 11, marginTop: 4 }}>
                                                     {sub.chargeCount} charge{sub.chargeCount !== 1 ? 's' : ''} • Next: {formatShortDate(sub.nextExpectedDate)}
                                                 </Text>
-                                            </View>
+                                            </TouchableOpacity>
 
                                             {/* Amount */}
-                                            <View style={{ alignItems: 'flex-end', marginLeft: 8 }}>
+                                            <View style={{ alignItems: 'flex-end', marginLeft: 8, marginRight: 8 }}>
                                                 <Text style={{ fontWeight: 'bold', color: '#7c3aed', fontSize: 16 }}>
                                                     ${sub.latestAmount.toFixed(2)}
                                                 </Text>
@@ -328,13 +350,77 @@ export default function SubscriptionsScreen() {
                                                     /{sub.frequency === 'yearly' ? 'yr' : sub.frequency === 'weekly' ? 'wk' : 'mo'}
                                                 </Text>
                                             </View>
-                                        </TouchableOpacity>
+
+                                            {/* Dismiss X button */}
+                                            <TouchableOpacity
+                                                onPress={() => handleDismiss(sub)}
+                                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                                style={{
+                                                    width: 28, height: 28, borderRadius: 14,
+                                                    backgroundColor: '#fee2e2',
+                                                    alignItems: 'center', justifyContent: 'center',
+                                                }}
+                                            >
+                                                <Ionicons name="close" size={14} color="#dc2626" />
+                                            </TouchableOpacity>
+                                        </View>
                                     );
                                 })}
                             </View>
                         )}
                     </View>
                 ))}
+
+                {/* Dismissed Subscriptions Section */}
+                {dismissedSubscriptions.length > 0 && (
+                    <View style={{ marginTop: 8, marginBottom: 16 }}>
+                        <Text style={{ fontSize: 16, fontWeight: '600', color: '#6b7280', marginBottom: 12 }}>
+                            Removed ({dismissedSubscriptions.length})
+                        </Text>
+                        <View style={{
+                            backgroundColor: 'white',
+                            borderRadius: 16,
+                            borderWidth: 1,
+                            borderColor: '#e5e7eb',
+                            overflow: 'hidden',
+                            opacity: 0.6,
+                        }}>
+                            {dismissedSubscriptions.map((sub, index) => (
+                                <View
+                                    key={sub.id}
+                                    style={{
+                                        padding: 14,
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        borderBottomWidth: index < dismissedSubscriptions.length - 1 ? 1 : 0,
+                                        borderBottomColor: '#f3f4f6',
+                                    }}
+                                >
+                                    <Text style={{ fontSize: 20, marginRight: 10 }}>{sub.icon}</Text>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={{ fontWeight: '500', color: '#6b7280', fontSize: 14, textDecorationLine: 'line-through' }}>
+                                            {sub.displayName}
+                                        </Text>
+                                        <Text style={{ color: '#9ca3af', fontSize: 11 }}>
+                                            ${sub.latestAmount.toFixed(2)}/{sub.frequency === 'yearly' ? 'yr' : 'mo'}
+                                        </Text>
+                                    </View>
+                                    <TouchableOpacity
+                                        onPress={() => restoreSubscription(sub.id)}
+                                        style={{
+                                            backgroundColor: '#dbeafe',
+                                            paddingHorizontal: 12,
+                                            paddingVertical: 6,
+                                            borderRadius: 8,
+                                        }}
+                                    >
+                                        <Text style={{ color: '#2563eb', fontSize: 12, fontWeight: '600' }}>Restore</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            ))}
+                        </View>
+                    </View>
+                )}
 
                 <View style={{ height: 40 }} />
             </ScrollView>

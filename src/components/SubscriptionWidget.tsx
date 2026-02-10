@@ -6,12 +6,14 @@ import { detectSubscriptions, groupByCard } from '../utils/subscriptionDetector'
 import { useRouter } from 'expo-router';
 
 export function SubscriptionWidget() {
-    const { transactions, accounts } = useDataStore();
+    const { transactions, accounts, dismissedSubscriptionIds } = useDataStore();
     const router = useRouter();
 
     const allSubscriptions = useMemo(
-        () => detectSubscriptions(transactions, accounts),
-        [transactions, accounts]
+        () => detectSubscriptions(transactions, accounts).filter(
+            s => !dismissedSubscriptionIds.includes(s.id)
+        ),
+        [transactions, accounts, dismissedSubscriptionIds]
     );
 
     const cardGroups = useMemo(

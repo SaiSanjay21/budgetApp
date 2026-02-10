@@ -10,6 +10,7 @@ import { AddTransactionModal } from '../../src/components/AddTransactionModal';
 import { useRouter } from 'expo-router';
 import { Transaction } from '../../src/types';
 import { SubscriptionWidget } from '../../src/components/SubscriptionWidget';
+import { ExpensePredictionWidget } from '../../src/components/ExpensePredictionWidget';
 
 export default function Dashboard() {
     const { user } = useAuthStore();
@@ -164,6 +165,9 @@ export default function Dashboard() {
 
                 {/* Subscription Widget */}
                 {hasTransactions && <SubscriptionWidget />}
+
+                {/* Expense Prediction Widget */}
+                {hasTransactions && <ExpensePredictionWidget />}
 
                 {/* Empty State */}
                 {!hasTransactions && (

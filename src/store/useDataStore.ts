@@ -18,6 +18,8 @@ interface DataState {
     accounts: BankAccount[];
     transactions: Transaction[];
     isLoading: boolean;
+    /** IDs of subscriptions the user has dismissed/cancelled */
+    dismissedSubscriptionIds: string[];
     refreshData: () => Promise<void>;
     addTransaction: (tx: Transaction) => void;
     updateTransaction: (tx: Transaction) => void;
@@ -26,12 +28,17 @@ interface DataState {
     clearAllData: () => void;
     updateAccountBalance: (accountId: string, balance: number) => void;
     getAccountTransactions: (accountId: string) => Transaction[];
+    /** Dismiss a subscription so it's excluded from predictions */
+    dismissSubscription: (subscriptionId: string) => void;
+    /** Restore a previously dismissed subscription */
+    restoreSubscription: (subscriptionId: string) => void;
 }
 
 export const useDataStore = create<DataState>((set, get) => ({
     accounts: INITIAL_ACCOUNTS,
     transactions: [],
     isLoading: false,
+    dismissedSubscriptionIds: [],
 
     refreshData: async () => {
         set({ isLoading: true });
@@ -114,7 +121,8 @@ export const useDataStore = create<DataState>((set, get) => ({
 
     clearAllData: () => set({
         transactions: [],
-        accounts: INITIAL_ACCOUNTS.map(acc => ({ ...acc, balance: 0 }))
+        accounts: INITIAL_ACCOUNTS.map(acc => ({ ...acc, balance: 0 })),
+        dismissedSubscriptionIds: [],
     }),
 
     updateAccountBalance: (accountId, balance) => set((state) => ({
@@ -125,5 +133,13 @@ export const useDataStore = create<DataState>((set, get) => ({
 
     getAccountTransactions: (accountId) => {
         return get().transactions.filter(tx => tx.accountId === accountId);
-    }
+    },
+
+    dismissSubscription: (subscriptionId) => set((state) => ({
+        dismissedSubscriptionIds: [...state.dismissedSubscriptionIds, subscriptionId],
+    })),
+
+    restoreSubscription: (subscriptionId) => set((state) => ({
+        dismissedSubscriptionIds: state.dismissedSubscriptionIds.filter(id => id !== subscriptionId),
+    })),
 }));
